@@ -1,10 +1,31 @@
 # Video Download Analysis
 
-一个在本地运行的多平台视频分析助手。给它一条视频链接或一段分享文字，它会下载单条视频、提取语音与画面文字、挑选关键帧、检查动作片段，再生成带时间戳和证据 ID 的中文报告。
+这是一个由多个 LangGraph 节点组成的本地视频分析工具。给它一条 B站、抖音、快手或小红书的视频链接，它先下载视频，再抽取声音、镜头和关键帧，最后生成带时间戳和证据 ID 的中文报告。节点顺序由代码确定，模型负责识别和理解内容。
 
-**本仓库的目的**：公开这套可复现的 LangGraph 视频分析工作流，并用四条已验证的视频展示下载、抽帧和内容理解的结果。仓库只放代码、测试、示例报告和每例 4 张关键帧；**不上传原视频、运行缓存、浏览器资料或 API 密钥**。原视频由使用者在本地运行命令下载。
+## 百炼模型在流程中做什么
 
-> 项目使用 LangGraph 编排固定节点，使用 LangChain 组织总结提示词和结构化输出。这里的“Agent”指可续跑的图式处理流程；当前版本不会让模型自主挑选工具或任意访问网站。
+下载、切镜头和抽帧由普通程序完成；**语音转写、画面/动作描述和最终内容总结确实调用了阿里云百炼接口**。四条示例视频在本地完整运行时都调用了这些模型，而不只是运行了下载和 OCR。调用代码集中在 [models.py](douyin_review/models.py)，由 [workflow.py](douyin_review/workflow.py) 的节点按依赖关系执行。
+
+| 处理位置 | 模型和调用方式 | 输入与产物 |
+| --- | --- | --- |
+| `audio` | `qwen-audio-3.0-asr-flash`；`httpx` 调百炼原生语音端点 | FFmpeg 切出的 16 kHz 单声道音频块 → 带原视频时间戳的 ASR 片段。 |
+| `vision` 图片分支 | `qwen3.8-flash`；OpenAI 兼容接口 | 每镜头代表帧（最多 6 张一批，必要时补开场帧）→ 人物、物体、场景、可见文字和风格描述。 |
+| `vision` 动作分支 | `qwen3.8-flash`；OpenAI 兼容接口的视频输入 | 最多 3 段经过 FFmpeg 缩小且去掉原音频的短片 → 动作、转场和事件顺序描述。 |
+| `understand` | `qwen3.8-flash`；LangChain `ChatOpenAI` + Pydantic 结构化输出 | ASR、OCR、视觉描述、片段描述和发布信息汇成的时间轴证据 → 主题、故事、分段、摘要和不确定点。 |
+| 条件审校与修复 | 符合跨模态冲突条件时，LangChain 调 `qwen3.8-max`；概述残缺时，OpenAI 兼容接口再调 `qwen3.8-flash` | 只修正被触发的结尾/不确定点或概述；失败时保留初稿并记录状态。 |
+
+凭证由环境变量注入：语音先走工作空间的百炼原生接口；只有该路径返回空的 HTTP 400 时，代码才用同一按量计费 Key 尝试区域原生接口。图片、短片和文本走工作空间的 OpenAI 兼容接口。原视频声音不会交给视频视觉模型，语音与画面证据在后面才汇合。
+
+下表是四条**最终运行产物**中的记录。它说明哪些模型结果真正进入了报告；数字是片段或观察条数，**不是计费 HTTP 请求数**。网络重试、批次拆分和质量修复可能增加请求。
+
+| 示例 | ASR 片段 | 图片观察 | 动作片段 | 文本总结之后的处理 |
+| --- | ---: | ---: | ---: | --- |
+| [B站](examples/bilibili/README.md) | 13 | 21 | 3 | `qwen3.8-max` 结尾审校已接受 |
+| [抖音](examples/douyin/README.md) | 2 | 1 | 3 | `qwen3.8-flash` 概述修复已接受 |
+| [快手](examples/kuaishou/README.md) | 23 | 20 | 3 | 保留结构化初稿 |
+| [小红书](examples/xiaohongshu/README.md) | 15 | 22 | 3 | `qwen3.8-max` 结尾审校已接受 |
+
+PaddleOCR 是本地识字，不是百炼调用。LangGraph 负责安排节点、并行汇合、重试和续跑；LangChain 用在文本总结与审校的提示词和结构化输出中。模型不会自行决定下载哪个视频或调用哪个工具。
 
 ## 已验证的四个平台示例
 
@@ -26,14 +47,14 @@ flowchart LR
     I["分享文字 / URL / 本地文件"] --> R["resolve_source<br/>识别平台和视频"]
     R --> D["download<br/>yt-dlp / 无头浏览器回退"]
     D --> P["inspect<br/>ffprobe 和字幕"]
-    P --> A["audio<br/>FFmpeg 分块 + ASR"]
+    P --> A["audio<br/>FFmpeg + qwen-audio-3.0-asr-flash"]
     P --> S["scenes<br/>切镜头 + 抽帧"]
     S --> O["ocr<br/>本地 PaddleOCR"]
-    S --> V["vision<br/>代表帧 + 动作片段"]
+    S --> V["vision<br/>qwen3.8-flash 图片/短片理解"]
     A --> F["fuse<br/>统一时间轴证据"]
     O --> F
     V --> F
-    F --> U["understand<br/>结构化总结和审校"]
+    F --> U["understand<br/>qwen3.8-flash 总结<br/>冲突时 qwen3.8-max 审校"]
     U --> Q["report<br/>Markdown 报告"]
     Q --> X["export_results<br/>JSON + 精选关键帧"]
 ```
@@ -45,12 +66,12 @@ flowchart LR
 | `resolve_source` | 分享文字/URL → `source.json` | 找到唯一受支持的链接，规范化公开地址；下载所需的临时参数仅留在内部数据。 |
 | `download` | 视频地址 → `media.json`、原视频 | 首先尝试 yt-dlp；失败后按平台尝试 Chrome Cookie 或无头页面媒体地址。 |
 | `inspect` | 原视频 → `probe.json` | ffprobe 确认时长、音视频流、分辨率及字幕；FFmpeg 导出可用字幕轨。 |
-| `audio` | 音轨 → `asr.json` | FFmpeg 转 16 kHz 单声道 MP3，最多约 180 秒一块、相邻重叠 1 秒；ASR 时间换算回原视频毫秒。 |
+| `audio` | 音轨 → `asr.json` | FFmpeg 转 16 kHz 单声道 MP3，最多约 180 秒一块、相邻重叠 1 秒；调用 `qwen-audio-3.0-asr-flash`，把块内时间换算回原视频毫秒。 |
 | `scenes` | 视频 → `scenes.json`、抽帧 | PySceneDetect 找镜头边界；OpenCV 保存镜头候选帧和约每 500 毫秒一张的 OCR 采样帧。 |
 | `ocr` | 采样帧/字幕 → `ocr.json` | PaddleOCR 本地识字，合并时间相邻的重复文字；独立解析 SRT。 |
-| `vision` | 候选帧/动作片段 → `visual.json` | 每镜头选代表帧，必要时补看开场帧；最多 24 张代表帧分批识别，并选最多 3 段短片检查动作和转场。 |
+| `vision` | 候选帧/动作片段 → `visual.json` | 每镜头选代表帧，必要时补看开场帧；调用 `qwen3.8-flash` 分批描述图片，并用同一模型检查最多 3 段短片的动作和转场。 |
 | `fuse` | ASR/OCR/视觉/发布信息 → `evidence.json` | 给不同来源附加统一的毫秒时间轴和证据 ID；按质量、文字关联和感知哈希选最多 24 张不重复关键帧。 |
-| `understand` | 时间轴证据 → `analysis.json` | 根据证据生成主题、故事、分段结构、摘要和不确定项；核对证据 ID，必要时做有限审校。 |
+| `understand` | 时间轴证据 → `analysis.json` | LangChain 调 `qwen3.8-flash` 生成主题、故事、分段结构、摘要和不确定项；核对证据 ID，有跨模态冲突时尝试 `qwen3.8-max` 审校。 |
 | `report` | 结构化分析 → `report.md` | 生成可阅读的时间轴报告。图结束后，CLI 再导出可移动的结果目录。 |
 
 ### 为什么图片和动作要分别分析？
@@ -59,7 +80,7 @@ flowchart LR
 
 视觉模型接收的短片**不含原音频**。声音由 ASR 单独处理，屏幕文字由 OCR 单独处理。它们在 `fuse` 中仍保留各自来源，避免把画面推断当作台词。
 
-### 证据与模型
+### 证据与所用组件
 
 一条证据至少包含 `id`、`source`、`start_ms`、`end_ms` 和 `text`。例如 `asr_...` 是语音，`ocr_...` 是画面文字，`visual_...` 是静态画面描述，`clip_...` 是动作片段描述；最终结构段引用这些 ID。完整原始证据留在内部 JSON，送给总结模型的是去掉图片绝对路径和 OCR 坐标后的紧凑版本。
 
