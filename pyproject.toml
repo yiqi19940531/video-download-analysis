@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-video-review"
+version = "0.2.0"
+description = "Bilibili, Douyin, Kuaishou, and Xiaohongshu video analysis with LangGraph"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "langgraph>=1.0,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+  "langchain-core>=1.0,<2",
+  "langchain-openai>=1.0,<2",
+  "openai>=2.0,<3",
+  "httpx[socks]>=0.27,<1",
+  "pydantic>=2.8,<3",
+  "scenedetect>=0.7,<1",
+  "opencv-python-headless>=4.10,<5",
+  "Pillow>=10,<12",
+  "ImageHash>=4.3,<5",
+]
+
+[project.optional-dependencies]
+ocr = ["paddleocr>=3.0,<4", "paddlepaddle>=3.0,<4"]
+browser = ["playwright>=1.48,<2"]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+video-review = "douyin_review.cli:main"
+video-review-preflight = "douyin_review.preflight:main"
+douyin-review = "douyin_review.cli:main"
+douyin-review-preflight = "douyin_review.preflight:main"
+
+[tool.setuptools.packages.find]
+include = ["douyin_review*"]
