@@ -8,3 +8,24 @@ __pycache__/
 *.pyc
 *.egg-info/
 .DS_Store
+
+# Agent Loop runtime and private validation data
+/agent_loop/runs/
+/agent_loop/results/
+/agent_loop/validation/
+
+# Downloaded media, checkpoints, browser profiles, and local tool binaries
+*.mp4
+*.webm
+*.mov
+*.mkv
+*.mp3
+*.m4a
+*.wav
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+chrome-profile/
+ffmpeg
+ffprobe
+yt-dlp

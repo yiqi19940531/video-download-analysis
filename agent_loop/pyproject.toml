@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-agent-loop"
+version = "0.1.0"
+description = "Model-directed, human-interruptible video analysis loop"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "multi-video-review>=0.2,<0.3",
+  "langgraph>=1.0,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+  "openai>=2.0,<3",
+  "pydantic>=2.8,<3",
+]
+
+[project.scripts]
+video-review-agent = "agent_loop.cli:main"
+
+[tool.setuptools]
+packages = ["agent_loop"]
+
+[tool.setuptools.package-dir]
+agent_loop = "."
